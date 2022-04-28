@@ -1,0 +1,145 @@
+---
+- name: checks NFS on my buffalo linkstation and installs ipkg and unfs3 if needed
+  hosts: buffalo
+  vars:
+    exports_src: files/etc/exports
+    exports_dest: /opt/etc/exports
+
+  tasks:
+#  - name: check for ipkg
+#    stat:
+#      path: /opt/bin/ipkg
+#    register: ipkg_check
+#    debug:
+#      msg="{{ ipkg_check.stat }}"
+
+  - name: Check for ipkg
+    stat:
+      path: /opt/bin/ipkg
+    register: ipkg_check
+
+  - name: ipkg is installed
+    debug:
+      msg: "ipkg exists"
+    when: ipkg_check.stat.exists
+
+  - name: wget ipkg
+    #command: wget -O /tmp/lspro-bootstrap_1.2-7_arm.xsh http://ipkg.nslu2-linux.org/feeds/optware/cs05q3armel/cross/stable/lspro-bootstrap_1.2-7_arm.xsh
+    get_url:
+      url: http://ipkg.nslu2-linux.org/feeds/optware/cs05q3armel/cross/stable/lspro-bootstrap_1.2-7_arm.xsh
+      dest: /tmp/
+      mode: '0755'
+    register: wget_output
+    when: ipkg_check.stat.exists == False
+
+  - name: install ipkg
+  # command vs. script, script transfer  from ansible host to client, since we got it directly, no need
+  # the bootstrap script never seems to exit cleanly via ssh, so we launch it in the background and then
+  # wait until the /opt/bin/ipkg file appears
+    command: /tmp/lspro-bootstrap_1.2-7_arm.xsh
+    register: ipkg_install
+    async: 120
+    poll: 0
+    when: (ipkg_check.stat.exists == False) and (wget_output.status_code == 200)
+
+  - name: wait for ipkg file
+    wait_for:
+      path:  /opt/bin/ipkg
+
+  - name: check for ipkg data
+    stat:
+      path: /opt/lib/ipkg/lists/cross
+    register: ipkg_data
+
+  - name: ipkg update after installing
+    command: /opt/bin/ipkg update
+    when: ipkg_data.stat.exists == false
+
+#
+## verify both portmap and nfsd are there using stat -
+  - name: Check for portmap
+    stat:
+      path: /opt/sbin/portmap
+    register: portmap_check
+
+## install if portmap_checks.stat.exists == False
+##/opt/bin/ipkg install portmap
+#
+  - name: Check for unfsd
+    stat:
+      path: /opt/sbin/unfsd
+    register: unfsd_check
+
+  - name: install if unfsd_checks.stat.exists == False
+    command: /opt/bin/ipkg install unfs3
+    register: unfs_install
+    when: unfsd_check.stat.exists == False
+  - name: Check for portmap
+    stat:
+      path: /opt/sbin/portmap
+    register: portmap_check
+
+  - name: install portmap if needed
+    command: /opt/bin/ipkg install portmap
+    register: portmap_install
+    when: portmap_check.stat.exists == False
+#
+# now that unfs3 and portmap is installed, check for exports and start
+#
+
+  - name: Check for running portmap
+ # note - used failed_when rc == 2 so that we can get the 0 / 1 if the process is running
+    shell: "ps w|grep portmap|grep -v grep"
+    ignore_errors: yes
+    register: running_processes
+    failed_when: running_processes.rc == 2
+#
+  - name: Found portmap
+    debug:
+      msg: "Found process for  portmap "
+    when: running_processes.rc == 0
+#
+  - name: portmap  not found, start
+    shell: /opt/etc/init.d/S55portmap
+    register: portman_start
+    when: running_processes.rc == 1
+#
+  - name: Check for running nfs
+    shell: "ps w|grep unfsd|grep -v grep"
+    ignore_errors: yes
+    register: running_processes
+    failed_when: running_processes.rc == 2
+#
+  - name: Found nfs
+    debug:
+      msg: "Found process for nfsd "
+    when: running_processes.rc == 0
+#
+  - name: nfs not found, start
+    shell: /opt/etc/init.d/S56unfsd
+    register: nfsd_start
+    when: running_processes.rc == 1
+
+  - name: Check for exports
+    stat:
+      path: /opt/etc/exports
+    register: register_name
+#
+  - name: exports is there
+    debug:
+      msg: "exports exists"
+    when: register_name.stat.exists
+#
+  - name: exports is not there
+    copy:
+      src: "{{ exports_src }}"
+      dest: "{{ exports_dest }}"
+      owner: root
+      mode: 0644
+    register: exports_copy
+    when: register_name.stat.exists == False
+
+  - name: restart nfs when exports changed
+    shell: /opt/etc/init.d/S56unfsd
+    register: nfsd_start
+    when: exports_copy.changed

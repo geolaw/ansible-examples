@@ -1,0 +1,14 @@
+The buffalo nas does not have NFS built in - and its CIFS sharing is very elementary -
+cifs version 1 only.
+
+the buffalo nas operating system reverts back to its defaults after a reboot, as such, every time
+there is a power blip, any changes that had been made  -
+new directories created such as /opt/bin, etc ... all get wiped out.
+
+files in existing default directories, such as /root/.ssh/authorized_keys remain.
+
+
+
+ansible-playbook -i hosts buffalo.yml
+
+runs as root, so no sudo or username needed
