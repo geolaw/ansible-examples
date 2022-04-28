@@ -1,0 +1,71 @@
+---
+- name: install and configure bind for caching and update resolv.conf
+  hosts: fedora_x86
+  vars:
+    postfix_pkg: postfix
+    postfix_svc: postfix
+    postfix_secret: files/etc/postfix/sasl_passwd
+    postfix_secret_dest: /etc/postfix/sasl_passwd
+    postfix_conf_src: files/etc/postfix/main.cf
+    postfix_conf_dest: /etc/postfix/main.cf
+    fordward_file: files/.forward
+    glaw_forward: /home/glaw/.forward
+    root_forward: /root/.forward
+
+
+  tasks:
+    - name: latest version of necessary packages installed
+      yum:
+        name:
+          - "{{ postfix_pkg }}"
+        state: latest
+
+    - name: configure root forward
+      copy:
+        src: "{{ fordward_file }}"
+        dest: "{{ root_forward }}"
+        owner: root
+        group: root
+        backup: no
+
+    - name: configure glaw forward
+      copy:
+        src: "{{ fordward_file }}"
+        dest: "{{ glaw_forward }}"
+        owner: glaw
+        group: glaw
+        backup: no
+
+    - name: configure postfix
+      copy:
+        src: "{{ postfix_conf_src }}"
+        dest: "{{ postfix_conf_dest }}"
+        owner: root
+        group: root
+        mode: 0600
+        backup: yes
+
+    - name: configure postfix relay passwd
+      copy:
+        src: "{{ postfix_secret }}"
+        dest: "{{ postfix_secret_dest }}"
+        owner: root
+        group: root
+        mode: 0600
+        backup: yes
+
+    - name: postmap
+      shell: "postmap /etc/postfix/sasl_passwd"
+
+    - name: named service enable and started
+      service:
+        name: "{{ postfix_svc }}"
+        state: started
+        enabled: true
+
+    - name: send test email
+      mail:
+        to: geolaw999@gmail.com
+        subject: "test message from {{ ansible_hostname }}"
+        body: "system {{ ansible_hostname }} has been successfully configured to send email"
+
